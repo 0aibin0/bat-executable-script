@@ -168,10 +168,18 @@ mkdir "%TMPD%" 2>nul
 :: 否则两路内容重复, 白占磁盘也双倍报错
 :: 设备端 timeout 兜底: 即使本机收屹失败(主窗口被直接关掉),
 :: 设备端也会自己退出, 不会无限写磁盘
-set "COLCMD=!ADB!"
-if not "%HARD_LIMIT_SEC%"=="0" set "COLCMD=!ADB! shell timeout %HARD_LIMIT_SEC%"
-call :make_col "DCMON_LOGCAT" "logcat.txt"   "%COLCMD% logcat -b main,system,crash,events -v threadtime"
-call :make_col "DCMON_DMESG"  "dmesg.log"    "%COLCMD% dmesg -w"
+:: 两条采集命令形式不同, 不能共用一个前缀:
+::   logcat -> adb logcat ...        (不需 shell)
+::   dmesg  -> adb shell dmesg ...   (必须经过 shell, 否则 adb 报 unknown command)
+if "%HARD_LIMIT_SEC%"=="0" (
+    set "CMD_LOGCAT=!ADB! logcat -b main,system,crash,events -v threadtime"
+    set "CMD_DMESG=!ADB! shell dmesg -w"
+) else (
+    set "CMD_LOGCAT=!ADB! logcat -b main,system,crash,events -v threadtime"
+    set "CMD_DMESG=!ADB! shell timeout %HARD_LIMIT_SEC% dmesg -w"
+)
+call :make_col "DCMON_LOGCAT" "logcat.txt"   "!CMD_LOGCAT!"
+call :make_col "DCMON_DMESG"  "dmesg.log"    "!CMD_DMESG!"
 :: 需要触摸事件时间线时取消下面两行注释
 :: call :make_col "DCMON_GETEV" "getevent.log" "adb shell getevent -tlr"
 :: start "DCMON_GETEV" cmd /c ""%TMPD%\DCMON_GETEV.bat""
