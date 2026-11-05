@@ -1,0 +1,24 @@
+# 采集产物
+LOGS_*/
+_probe/
+_collector_tmp/
+
+# 运行时临时文件
+failures.tmp
+model.tmp
+build.tmp
+id.txt
+root.txt
+pull.txt
+logcat_G.txt
+bugreport_log.txt
+_*.tmp
+
+# 备份
+*.bak_*
+*.bak2
+
+# 系统/编辑器
+Thumbs.db
+desktop.ini
+.vscode/
