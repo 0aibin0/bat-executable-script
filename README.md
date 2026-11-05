@@ -10,8 +10,7 @@ Windows 批处理脚本，用于 Android 显示问题的日志采集与排查。
 
 ```
 bat_scripts/
-├── disp_continuous_monitor.bat      显示问题复现采集（主力脚本）
-├── _place_windows.ps1               采集窗口摆位（disp 依赖，必须同目录）
+├── disp_continuous_monitor.bat      显示问题复现采集（主力脚本，单文件无依赖）
 ├── current_display.bat              当前显示栈单次快照
 ├── qcom_collect_logs.bat            高通平台多路并行采集
 ├── PM_GPIO_CTRL-mimo.bat            PMIC GPIO 电平/方向/驱动强度调试
@@ -71,6 +70,7 @@ set ADB_SERIAL=<序列号> & disp_continuous_monitor.bat
 | `HARD_LIMIT_SEC` | 0 | 采集进程**设备端**硬上限秒数，0 = 不限 |
 | `ADB_SERIAL` | 空 | 多设备时指定序列号 |
 | `SKIP_BUGREPORT` | 0 | 1 = 跳过 bugreport（省 1–3 分钟）|
+| `KEEP_RUNS` | 0 | 只保留最近 N 个 `LOGS_*` 目录，更早的自动删除；0 = 不清理 |
 | `DCMON_NO_EXIT` | 未设 | 1 = 跳过结尾 pause，供自动化调用 |
 
 ### 产物
@@ -94,7 +94,9 @@ session_summary.txt                 会话汇总（参数、时长、失败项�
 - `DCMON_LOGCAT` → `logcat.txt`（不含 kernel 缓冲，避免与 dmesg 重复）
 - `DCMON_DMESG`  → `dmesg.log`
 
-`_place_windows.ps1` 会把两个窗口**左右摆开**，否则它们会完全重叠、看起来只有一个窗口。
+两个窗口可能重叠显示，把其中一个拖开即可。
+
+> 曾经用 `_place_windows.ps1` 自动摆位，现已移除（重叠不影响功能，减少一个依赖文件）。
 
 ---
 

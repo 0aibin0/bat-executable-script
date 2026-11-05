@@ -15,10 +15,6 @@ title Display Replay Monitor
 ::   5. 前基线快照之后才清 logcat 缓冲, 复现窗口可用文件边界切分
 ::   6. 采集命令只写相对路径, 中文/空格路径不进临时 bat
 ::   7. 停止判定用墙钟时间, 不依赖 choice 的计时精度
-::
-::  依赖 _place_windows.ps1: 启动两个采集窗口后把它们摆开,
-::  否则两个控制台会完全重叠, 看起来只有一个窗口。
-::  两个文件必须放在同一目录。
 :: ================================================================
 
 :: ---------------- 可调参数 (环境变量已存在时尊重外部设置) ----------------
@@ -29,6 +25,8 @@ title Display Replay Monitor
 ::  POLL_SEC     检查间隔秒数
 ::  LOGCAT_BUF   设备端 logcat 环形缓冲
 ::  CLEAR_LOGCAT 1 = 前基线之后清缓冲(只留复现期间); 0 = 保留开机以来
+::  KEEP_RUNS    只保留最近 N 个 LOGS_* 目录, 更早的自动删除
+::               默认 0 = 不清理, 不会误删历史数据
 if not defined MAX_MIN      set "MAX_MIN=30"
 if not defined MAX_MB       set "MAX_MB=800"
 if not defined POLL_SEC     set "POLL_SEC=5"
@@ -37,6 +35,7 @@ if not defined CLEAR_LOGCAT set "CLEAR_LOGCAT=1"
 if not defined HARD_LIMIT_SEC set "HARD_LIMIT_SEC=0"   :: 0 = 不设硬上限
 if not defined ADB_SERIAL    set "ADB_SERIAL="         :: 多设备时指定序列号
 if not defined SKIP_BUGREPORT set "SKIP_BUGREPORT=0"   :: 1 = 跳过 bugreport
+if not defined KEEP_RUNS      set "KEEP_RUNS=0"        :: 只保留最近 N 个 LOGS_*, 0 = 不清理
 :: ---------------------------------------------------------------------
 
 set "FAILCNT=0"
@@ -191,10 +190,6 @@ set "PID_LOGCAT="
 set "PID_DMESG="
 for /f "usebackq delims=" %%p in (`powershell -NoProfile -Command "(Start-Process -FilePath cmd.exe -ArgumentList '/c','%TMPD%\DCMON_LOGCAT.bat' -PassThru).Id"`) do set "PID_LOGCAT=%%p"
 for /f "usebackq delims=" %%p in (`powershell -NoProfile -Command "(Start-Process -FilePath cmd.exe -ArgumentList '/c','%TMPD%\DCMON_DMESG.bat' -PassThru).Id"`) do set "PID_DMESG=%%p"
-:: 把两个采集窗口摆开, 否则完全重叠看不见第二个
-if defined PID_LOGCAT if defined PID_DMESG (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0_place_windows.ps1" -Pids "!PID_LOGCAT!,!PID_DMESG!" -Lay a >nul 2>&1
-)
 if defined PID_LOGCAT echo       LOGCAT window pid=!PID_LOGCAT!
 if defined PID_DMESG  echo       DMESG  window pid=!PID_DMESG!
 
@@ -391,6 +386,9 @@ echo ==========================================
 popd
 if exist "%TMPD%" rd /s /q "%TMPD%" >nul 2>&1
 
+:: 保留最近 KEEP_RUNS 个 LOGS_* 目录, 更早的删除
+if not "%KEEP_RUNS%"=="0" call :prune_runs
+
 :: 被其他脚本 call 时用 DCMON_NO_EXIT=1 跳过结尾等待
 if defined DCMON_NO_EXIT exit /b 0
 pause
@@ -473,4 +471,18 @@ exit /b 0
     echo %~3 ^> %~2 2^>^&1
 ) > "%TMPD%\%~1.bat"
 exit /b 0
-
+:prune_runs
+:: 只保留最近 KEEP_RUNS 个 LOGS_* 目录
+:: 目录名带时间戳, 按名字降序 = 从新到旧
+set /a _keep=%KEEP_RUNS%
+set /a _idx=0
+set /a _del=0
+for /f "delims=" %%D in ('dir /b /ad /o-n "%~dp0LOGS_*" 2^>nul') do (
+    set /a _idx+=1
+    if !_idx! GTR !_keep! (
+        rd /s /q "%~dp0%%D" >nul 2>&1
+        set /a _del+=1
+    )
+)
+if !_del! GTR 0 echo [ .. ] 已清理 !_del! 个旧 LOGS 目录
+exit /b 0
