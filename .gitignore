@@ -22,3 +22,8 @@ _*.tmp
 Thumbs.db
 desktop.ini
 .vscode/
+
+# 与本仓库无关的二进制/工具
+*.exe
+*.dll
+repair_unitrans.exe

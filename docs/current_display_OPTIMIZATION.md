@@ -1,6 +1,7 @@
 # current_display.bat 优化说明
 
-> 对象：`current_display.bat`（原版 40 行 → 优化版 162 行）
+> 对象：`current_display.bat`（原版 40 行 → 优化版 192 行）
+> 更新：2026-11-19 新增可选 bugreport（`ENABLE_BUGREPORT=1`）
 > 备份：`current_display.bat.bak_20261105`（原版原样保留）
 > 验证：真机实测（AEOTS / p26-userdebug / 已 root），非桩测试
 > 日期：2026-11-05
@@ -15,6 +16,8 @@
 `devices.txt` / `logcat_all_current.txt` / `dmesg_current.txt` / `dumpsys_display_current.txt` / `dumpsys_sf_current.txt` / `dumpsys_input_current.txt` / `dumpsys_power_current.txt` / `dumpsys_gpu_current.txt` / `dumpsys_meminfo_current.txt` / `dumpsys_window_current.txt` / `getprop_current.txt` / `cmdline.txt`
 
 新增一份 `snapshot_summary.txt`，列出每个产物的字节数。
+
+**默认不抓 bugreport**（见第 6 节）：这个脚本定位是"几秒出结果的快速点查"，而 `adb bugreport` 要 1–3 分钟。需要时用 `ENABLE_BUGREPORT=1` 显式开启。
 
 ---
 
@@ -89,7 +92,8 @@ DRIVER-EXITCODE=1
 | 场景 | 平时看当前状态 | 复现一个问题时抓现场 |
 | 抓取方式 | 一次快照 | 并行实时 + 前后双快照 |
 | 是否清 logcat 缓冲 | **不清**（保留开机以来历史） | 复现期专用时清 |
-| 耗时 | 几秒 | 几分钟 |
+| 耗时 | 几秒（开 bugreport 后多 1-3 分钟） | 几分钟 |
+| bugreport | 可选，`ENABLE_BUGREPORT=1` | 默认抓，`SKIP_BUGREPORT=1` 可跳过 |
 
 两者产物命名不同（`_current` vs `_before`/`_after`），不会互相覆盖。
 
@@ -108,11 +112,36 @@ DRIVER-EXITCODE=1
 ## 6. 使用方式
 
 ```bat
-current_display.bat                             :: 正常抓一次，结束前 pause
-set SNAP_NO_PAUSE=1 && current_display.bat      :: 不 pause，适合被别的脚本 call
+current_display.bat                              :: 正常抓一次（12 项快照，几秒），结束前 pause
+set SNAP_NO_PAUSE=1 && current_display.bat       :: 不 pause，适合被别的脚本 call
+set ENABLE_BUGREPORT=1 && current_display.bat    :: 额外抓 bugreport（多花 1-3 分钟）
 ```
 
 产物目录：`脚本同目录\LOGS_<yyyyMMdd_HHmmss>\`
+
+### 可选：bugreport
+
+| 变量 | 默认 | 含义 |
+|---|---|---|
+| `ENABLE_BUGREPORT` | 0 | 1 = 额外执行 `adb bugreport`，产出 `bugreport.zip` |
+| `SNAP_NO_PAUSE` | 0 | 1 = 跳过结尾 pause |
+
+开启后流程从 4 步变 5 步，编号自动调整（`[1/5]` … `[5/5]`）：
+
+```
+[5/5] Generating bugreport (1-3 min, do not close this window) ...
+  [ OK ] bugreport.zip  4634864 bytes
+```
+
+校验规则与 `disp_continuous_monitor.bat` 一致：
+退出码非 0 → `[FAIL]`；`zip` 小于 1 MB → `[WARN]` 疑似截断
+（截断的 zip 通常是磁盘不足或设备端 `bugreportz` 异常）。
+结果同样记进 `snapshot_summary.txt`。
+
+失败不影响其余快照：12 项快照已经先落盘了。
+
+> **注意**：这一项在 2026-11-19 加进去时**没有连真机验证**（当时 `adb devices` 为空）。
+> 逻辑与 `disp_continuous_monitor.bat` 里已实测过的 bugreport 段一致，属于静态验证。
 
 ---
 
@@ -121,3 +150,4 @@ set SNAP_NO_PAUSE=1 && current_display.bat      :: 不 pause，适合被别的�
 - 多设备同时在线时没有做序列号绑定（与仓库里 `PM_GPIO_CTRL-mimo.bat` 的 H-07 同类问题，本脚本未引入该复杂度）。
 - `dumpsys gpu` 在本机只有 2844 字节，属于该设备 dumpsys gpu 输出本身较短，不是抓取失败。
 - 未经长时间挂机验证（本脚本是单次快照，不涉及长时间写入）。
+- **`ENABLE_BUGREPORT=1` 分支未在真机验证**（2026-11-19 添加时无设备在线）。
