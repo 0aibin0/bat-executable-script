@@ -112,10 +112,31 @@ DRIVER-EXITCODE=1
 ## 6. 使用方式
 
 ```bat
-current_display.bat                              :: 正常抓一次（12 项快照，几秒），结束前 pause
+current_display.bat                              :: 双击运行，会问要不要抓 bugreport
 set SNAP_NO_PAUSE=1 && current_display.bat       :: 不 pause，适合被别的脚本 call
-set ENABLE_BUGREPORT=1 && current_display.bat    :: 额外抓 bugreport（多花 1-3 分钟）
 ```
+
+### 双击后会问一句
+
+```
+  Also capture bugreport?  [Y] yes  [N] no   (1-3 min, default N)
+      bugreport: NO
+```
+
+- 按 **Y** → 额外抓 `bugreport.zip`，流程变 5 步（多 1–3 分钟）
+- 按 **N** 或**等 10 秒不动** → 默认不抓，流程 4 步（几秒）
+- 回答后会回显 `bugreport: YES` / `bugreport: NO` 让你确认
+
+### 脚本化调用（跳过询问）
+
+预先设置环境变量即可绕过交互，CI / 被别的脚本 call 时用：
+
+```bat
+set ENABLE_BUGREPORT=0 && current_display.bat    :: 明确不抓，不弹询问
+set ENABLE_BUGREPORT=1 && current_display.bat    :: 明确要抓，不弹询问
+```
+
+只要 `ENABLE_BUGREPORT` 已被定义（0 或 1），就不再询问。
 
 产物目录：`脚本同目录\LOGS_<yyyyMMdd_HHmmss>\`
 
@@ -123,7 +144,7 @@ set ENABLE_BUGREPORT=1 && current_display.bat    :: 额外抓 bugreport（多花
 
 | 变量 | 默认 | 含义 |
 |---|---|---|
-| `ENABLE_BUGREPORT` | 0 | 1 = 额外执行 `adb bugreport`，产出 `bugreport.zip` |
+| `ENABLE_BUGREPORT` | 未设 | 未设时双击会询问；设为 0/1 则跳过询问，直接用该值 |
 | `SNAP_NO_PAUSE` | 0 | 1 = 跳过结尾 pause |
 
 开启后流程从 4 步变 5 步，编号自动调整（`[1/5]` … `[5/5]`）：

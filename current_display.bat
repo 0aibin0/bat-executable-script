@@ -23,20 +23,44 @@ title Current Display Snapshot
 ::   6. A summary file lists every artifact with its size
 ::
 ::  Usage:
-::    current_display.bat
-::    set SNAP_NO_PAUSE=1 & current_display.bat      (no final pause)
-::    set ENABLE_BUGREPORT=1 & current_display.bat   (also run adb bugreport)
+::    current_display.bat                        double click, asks about bugreport
+::    set SNAP_NO_PAUSE=1 & current_display.bat  no final pause
 ::
-::  adb bugreport takes 1-3 minutes, so it is OFF by default:
-::  this script is meant to be a fast point-in-time check.
+::  When run by double click it asks:
+::    Also capture bugreport? [Y/N]   (default N, auto-answers after 10s)
+::  adb bugreport takes 1-3 minutes, so the default is "no".
+::
+::  For scripted / unattended use, set the answer up front so the
+::  question is skipped:
+::    set ENABLE_BUGREPORT=0 & current_display.bat
+::    set ENABLE_BUGREPORT=1 & current_display.bat
 :: ================================================================
 
 if not defined SNAP_NO_PAUSE set "SNAP_NO_PAUSE=0"
-if not defined ENABLE_BUGREPORT set "ENABLE_BUGREPORT=0"
+
+:: ---------------- ask about bugreport ----------------
+:: Only asked when ENABLE_BUGREPORT was NOT set beforehand, so
+:: scripted runs can pre-answer and skip the prompt.
+if defined ENABLE_BUGREPORT goto :have_br
+echo.
+echo   Also capture bugreport?  [Y] yes  [N] no   (1-3 min, default N)
+choice /c YN /n /t 10 /d N >nul
+set "BRC=!errorlevel!"
+if "!BRC!"=="1" (
+    set "ENABLE_BUGREPORT=1"
+) else (
+    set "ENABLE_BUGREPORT=0"
+)
+:have_br
+if "!ENABLE_BUGREPORT!"=="1" (
+    echo       bugreport: YES
+) else (
+    echo       bugreport: NO
+)
 
 :: total step count depends on whether bugreport is enabled
 set "TOT=4"
-if "%ENABLE_BUGREPORT%"=="1" set "TOT=5"
+if "!ENABLE_BUGREPORT!"=="1" set "TOT=5"
 
 :: ---------------- 1. timestamp + output dir ----------------
 set "STAMP="
@@ -111,7 +135,7 @@ call :snap "getprop"          getprop_current.txt         "adb shell getprop"
 call :snap "cmdline"          cmdline.txt                 "adb shell cat /proc/cmdline"
 
 :: ---------------- 5. optional bugreport ----------------
-if "%ENABLE_BUGREPORT%"=="1" (
+if "!ENABLE_BUGREPORT!"=="1" (
     echo [5/!TOT!] Generating bugreport ^(1-3 min, do not close this window^) ...
     adb bugreport "%OUT%\bugreport.zip" >"%OUT%\bugreport_log.txt" 2>&1
     if errorlevel 1 (
