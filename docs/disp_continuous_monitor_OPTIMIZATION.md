@@ -3,7 +3,7 @@
 > 对象：`disp_continuous_monitor.bat`（原版 90 行 → 现状 ~460 行）
 > 备份：`.bak_20261105`（第二轮前）、`.bak_gbk`（GBK 版）、`.bak_ascii`（纯 ASCII 版）
 > 审计依据：`BAT_SCRIPTS_ANALYSIS.md`（BLK-01 / H-01 / H-02 / H-03 / M-01 / M-03 / M-04 / L-06）
-> 日期：2026-11-05
+> 日期：2026-11-05（初版） / 2026-11-20（第二轮优化）
 > 本文由 5 份分阶段文档合并而成，末尾保留「未解决」与「踩坑记录」两节。
 
 ---
@@ -213,6 +213,57 @@ OWNER pid=8832 (explorer)  class=CabinetWClass  title=[bat脚本]
 3. **多设备路径未在真机验证**（当前只连 1 台），检测与 `-s` 注入逻辑是静态验证的。
 4. **`HARD_LIMIT_SEC` 依赖设备端 `toybox timeout`**。极老设备若无此命令，采集窗口会**立即退出而非报错**——真机上若发现 `dmesg.log` 为空且秒退，先查这条。
 5. **长时间挂机（>30 分钟）的磁盘占用未验证**，只跑过 1–2 分钟窗口。
+
+---
+
+# 八点五、2026-11-20 第二轮优化
+
+这一轮以"真机跑一遍、把暴露出来的真问题修掉"为主，不引入新功能。
+
+## 修掉的 4 个真实缺陷
+
+| # | 缺陷 | 现象 | 根因 | 修法 |
+|---|---|---|---|---|
+| 1 | `!ADB!` 在定义前使用 | `devices.txt` 内容为"命令不存在"，退出码却被忽略 | `set "ADB=adb"` 写在使用它的 `devices -l` 之后，展开为空，实际执行了 `devices -l`（无此命令） | 把 `ADB` 定义提到"等设备+root"段最前面（第 86 行），早于任何 `!ADB!` 使用 |
+| 2 | `:wait_device` 被 `!ADB!` 空展开击穿 | **无设备时脚本报"设备已连接"**，一路往下跑到 `adb root` 才失败 | 同上：`call :wait_device 60` 在第 90 行，`ADB` 当时还没定义，`!ADB! get-state` 变成 `get-state`（无效命令立即返回）→ 被误判为"设备就绪" | 同 #1，定义前置后 `adb get-state` 返回 rc=1，等待逻辑恢复正常 |
+| 3 | `id.txt` / `model.tmp` / `build.tmp` 残留 | root 检测时 WARN 和 OK 同时打印，自相矛盾 | `adb shell id > id.txt 2>nul` 在 adb 失败时**不覆盖**已有文件，读到上一轮的内容 | 写入前先 `del /f /q` |
+| 4 | 步骤编号硬编码 9 步 | `SKIP_BUGREPORT=1` 时仍显示 `[9/9]`，但实际只有 8 步 | `[x/9]` 是写死的字面量 | 加 `TOT` 变量（9 或 8），全部改为 `[x/!TOT!]`；跳过 bugreport 时显示 `[..]` |
+
+另外把 `echo [ OK ] 设备已连接` 从多设备检查**之前**移到**之后**——多设备时应该先报 FAIL 而不是先说 OK。
+
+## 真机验证
+
+设备 `12786557502185`（新设备，非之前那台 AEOTS）。
+
+```
+[1/8] 等待设备 ...          OK          <- 编号正确变成 8
+[ OK ] 设备已连接                       <- 在多设备检查之后
+[2/8] 申请 root ...         OK, 已 root  <- 不再自相矛盾
+[3/8] 抓取复现前基线 ...     11 项全 OK
+[5/8] 启动并行采集窗口 ...   LOGCAT pid=62240 / DMESG pid=39428
+[6/8] 关闭采集窗口 ...
+[7/8] 抓取复现后快照 ...     10 项(1 WARN)
+[8/8] 抓取屏幕截图 ...       WARN
+[..] 跳过 bugreport (SKIP_BUGREPORT=1)
+EXITCODE=0
+```
+
+## 复现后快照里出现的 3 个 WARN（设备问题，非脚本 bug）
+
+| 文件 | 内容 | 原因 |
+|---|---|---|
+| `dumpsys_meminfo_after.txt` (57B) | `Error with service 'meminfo' while dumping: DEAD_OBJECT` | 复现期间设备端 system_server 重启过 |
+| `dumpsys_window_after.txt` (28B) | `Can't find service: window` | 同上，服务还没起来 |
+| `screenshot.png` 未生成 | `adb: error: failed to get feature set: no devices/emulators found` | 设备已经掉线 |
+
+**这三条恰好证明了字节数校验的价值**：如果不做校验，它们会被当成"抓取成功"，
+实际拿到的是一句错误信息。
+
+## 本轮未做的
+
+- 没有加新的采集能力（getevent 仍是注释状态）。
+- `KEEP_RUNS`、`HARD_LIMIT_SEC`、`ADB_SERIAL`、`SKIP_BUGREPORT` 逻辑未改动。
+- 多设备场景仍未在真机验证（当时只连了 1 台）。
 
 ---
 

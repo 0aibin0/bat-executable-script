@@ -38,6 +38,10 @@ if not defined SKIP_BUGREPORT set "SKIP_BUGREPORT=0"   :: 1 = 跳过 bugreport
 if not defined KEEP_RUNS      set "KEEP_RUNS=0"        :: 只保留最近 N 个 LOGS_*, 0 = 不清理
 :: ---------------------------------------------------------------------
 
+:: 总步数随 SKIP_BUGREPORT 变化, 避免跳过时还显示 9 步
+set "TOT=9"
+if "%SKIP_BUGREPORT%"=="1" set "TOT=8"
+
 set "FAILCNT=0"
 set "WARNCNT=0"
 set "STOPWHY=operator"
@@ -76,7 +80,13 @@ break> "%FAILS%"
 
 :: ========== 2. 等设备 + root ==========
 echo.
-echo [1/9] 等待设备 ...
+
+:: 先把 ADB 命令前缀定义好, 后面所有调用都走它
+:: (之前写在 devices -l 之后, 导致那一行展开为空, 实际执行 "命令不存在")
+set "ADB=adb"
+if not "!ADB_SERIAL!"=="" set "ADB=adb -s !ADB_SERIAL!"
+
+echo [1/!TOT!] 等待设备 ...
 call :wait_device 60
 if errorlevel 1 (
     echo [FAIL] 60 秒内没有可用设备。先跑 "adb devices" 确认连接与授权。
@@ -84,15 +94,12 @@ if errorlevel 1 (
     pause
     exit /b 2
 )
-echo [ OK ] 设备已连接
-!ADB! devices -l                      > devices.txt 2>&1
 
 :: 多设备检测: adb 在多设备时所有命令都会报 "more than one device"
 :: 而原版本不判断这个, 所以全部快照都是空的且仍然报 "Done!"
 set /a _DEVN=0
 for /f "skip=1 tokens=1" %%d in ('adb devices') do set /a _DEVN+=1
-set "ADB=adb"
-if not "!ADB_SERIAL!"=="" set "ADB=adb -s !ADB_SERIAL!"
+!ADB! devices -l                      > devices.txt 2>&1
 if !_DEVN! GTR 1 (
     echo [FAIL] 检测到 !_DEVN! 台设备在线, adb 无法确定目标。
     echo        请用环境变量指定一台:
@@ -106,10 +113,14 @@ if !_DEVN! GTR 1 (
 if not "!ADB_SERIAL!"=="" (
     echo       Using serial: !ADB_SERIAL!
 )
+echo [ OK ] 设备已连接
+:: 先删旧文件, 避免 adb 失败时留下上一轮的设备信息
+if exist model.tmp del /f /q model.tmp >nul 2>&1
+if exist build.tmp del /f /q build.tmp >nul 2>&1
 !ADB! shell getprop ro.product.model  > model.tmp   2>&1
 !ADB! shell getprop ro.build.display.id > build.tmp 2>&1
 
-echo [2/9] 申请 root ...
+echo [2/!TOT!] 申请 root ...
 :: adb root 的退出码不可依赖: 已经是 root 的设备上,
 :: 不同 adb 版本有的返回 0、有的返回 1, 只能看输出文本
 :: 不看 adb root 的退出码, 也不靠它的输出文本: 
@@ -117,11 +128,14 @@ echo [2/9] 申请 root ...
 !ADB! root > root.txt 2>&1
 call :sleep 1
 set "ROOTED=0"
+:: 先删旧文件: adb 失败时不会覆盖, 会留上一轮的内容导致误判
+if exist id.txt del /f /q id.txt >nul 2>&1
 !ADB! shell id > id.txt 2>nul
 findstr /b /c:"uid=0(" id.txt >nul 2>&1 && set "ROOTED=1"
 if "!ROOTED!"=="0" (
     :: 再等一段重试: adb root 会重启 adbd, 重启期间请求可能失败
     call :sleep 3
+    if exist id.txt del /f /q id.txt >nul 2>&1
     !ADB! shell id > id.txt 2>nul
     findstr /b /c:"uid=0(" id.txt >nul 2>&1 && set "ROOTED=1"
 )
@@ -142,12 +156,12 @@ if errorlevel 1 (
 
 :: ========== 3. 复现前基线快照 (必须在清缓冲之前) ==========
 echo.
-echo [3/9] 抓取复现前基线 ...
+echo [3/!TOT!] 抓取复现前基线 ...
 call :snapshot before
 call :grab "cmdline.txt" "!ADB! shell cat /proc/cmdline"
 
 :: ========== 4. logcat 缓冲准备 ==========
-echo [4/9] 准备 logcat 缓冲 ...
+echo [4/!TOT!] 准备 logcat 缓冲 ...
 if "%CLEAR_LOGCAT%"=="1" (
     echo [ .. ] 清空设备端 logcat 缓冲 ^(前基线已保存^) ...
     !ADB! logcat -c -b all >nul 2>&1
@@ -160,7 +174,7 @@ if errorlevel 1 (
 )
 
 :: ========== 5. 并行实时抓取 ==========
-echo [5/9] 启动并行采集窗口 ...
+echo [5/!TOT!] 启动并行采集窗口 ...
 mkdir "%TMPD%" 2>nul
 
 :: 实时日志不要 kernel 缓冲: kernel 已由 dmesg.log 单独覆盖,
@@ -272,7 +286,7 @@ if "%STOPWHY%"=="size"     echo [STOP] 达到体积上限 %MAX_MB% MB, 自动停止
 if "%STOPWHY%"=="timeout"  echo [STOP] 达到时长上限 %MAX_MIN% 分钟, 自动停止
 if "%STOPWHY%"=="operator" echo [STOP] 收到停止指令, 停止采集
 
-echo [6/9] 关闭采集窗口 ...
+echo [6/!TOT!] 关闭采集窗口 ...
 :: /T 连子进程一起杀: cmd.exe 被杀时它派生的 adb.exe 也会退出
 :: 按 PID 精确回收: 只杀本次启动时记下来的那两个进程,
 :: 不会碰到你自己开着的其他窗口
@@ -302,11 +316,11 @@ if !_S2! GTR !_S1! (
 
 :: ========== 8. 复现后终点快照 ==========
 echo.
-echo [7/9] 抓取复现后快照 ...
+echo [7/!TOT!] 抓取复现后快照 ...
 call :snapshot after
 
 :: ========== 9. 截图 ==========
-echo [8/9] 抓取屏幕截图 ...
+echo [8/!TOT!] 抓取屏幕截图 ...
 !ADB! shell screencap -p /sdcard/screenshot.png >nul 2>&1
 !ADB! pull /sdcard/screenshot.png ./screenshot.png >pull.txt 2>&1
 !ADB! shell "rm -f /sdcard/screenshot.png" >NUL 2>&1
@@ -321,9 +335,9 @@ if exist "screenshot.png" (
 
 :: ========== 10. bugreport ==========
 if "%SKIP_BUGREPORT%"=="1" (
-    echo [9/9] 跳过 bugreport ^(由 SKIP_BUGREPORT=1 指定^) ...
+    echo [..] 跳过 bugreport ^(由 SKIP_BUGREPORT=1 指定^)
 ) else (
-    echo [9/9] 生成 bugreport ^(1-3 分钟, 请勿关闭窗口^) ...
+    echo [!TOT!/!TOT!] 生成 bugreport ^(1-3 分钟, 请勿关闭窗口^) ...
     !ADB! bugreport "%OUT%\bugreport.zip" >bugreport_log.txt 2>&1
     if errorlevel 1 (
         echo [FAIL] bugreport 失败 ^(见 bugreport_log.txt^)

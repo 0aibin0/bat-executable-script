@@ -27,3 +27,12 @@ desktop.ini
 *.exe
 *.dll
 repair_unitrans.exe
+
+# 脚本运行时产物
+id.txt
+id2.txt
+model.tmp
+build.tmp
+devices.txt
+root.txt
+pull.txt
