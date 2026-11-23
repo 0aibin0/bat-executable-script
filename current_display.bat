@@ -21,6 +21,7 @@ title Current Display Snapshot
 ::   5. Every adb call is checked and every output file is measured,
 ::      so an empty or truncated snapshot is visible immediately
 ::   6. A summary file lists every artifact with its size
+::   7. Captures a screenshot (screenshot.png) alongside the dumps
 ::
 ::  Usage:
 ::    current_display.bat                        double click, asks about bugreport
@@ -59,8 +60,8 @@ if "!ENABLE_BUGREPORT!"=="1" (
 )
 
 :: total step count depends on whether bugreport is enabled
-set "TOT=4"
-if "!ENABLE_BUGREPORT!"=="1" set "TOT=5"
+set "TOT=5"
+if "!ENABLE_BUGREPORT!"=="1" set "TOT=6"
 
 :: ---------------- 1. timestamp + output dir ----------------
 set "STAMP="
@@ -134,9 +135,13 @@ call :snap "dumpsys window"   dumpsys_window_current.txt  "adb shell dumpsys win
 call :snap "getprop"          getprop_current.txt         "adb shell getprop"
 call :snap "cmdline"          cmdline.txt                 "adb shell cat /proc/cmdline"
 
-:: ---------------- 5. optional bugreport ----------------
+:: ---------------- 5. screenshot ----------------
+echo [5/!TOT!] Capturing screenshot ...
+call :screenshot
+
+:: ---------------- 6. optional bugreport ----------------
 if "!ENABLE_BUGREPORT!"=="1" (
-    echo [5/!TOT!] Generating bugreport ^(1-3 min, do not close this window^) ...
+    echo [!TOT!/!TOT!] Generating bugreport ^(1-3 min, do not close this window^) ...
     adb bugreport "%OUT%\bugreport.zip" >"%OUT%\bugreport_log.txt" 2>&1
     if errorlevel 1 (
         echo   [FAIL] bugreport.zip
@@ -155,7 +160,7 @@ if "!ENABLE_BUGREPORT!"=="1" (
     )
 )
 
-:: ---------------- 6. summary ----------------
+:: ---------------- 7. summary ----------------
 echo.
 echo ================================================================
 echo  Snapshot summary
@@ -190,6 +195,49 @@ goto wd_loop
 if "%~1"=="" exit /b 0
 set /a _slp=%~1+1
 ping -n !_slp! 127.0.0.1 >nul 2>&1
+exit /b 0
+
+:: ================================================================
+:screenshot
+:: Grab a PNG from the device into the output dir.
+:: Uses /sdcard as the staging path because screencap can only write
+:: where the shell user may (and ./ on the host is not the device).
+:: ================================================================
+set "SHOT=screenshot.png"
+set "DEVSHOT=/sdcard/_cdsnap_shot.png"
+if exist "%SHOT%" del /f /q "%SHOT%" >nul 2>&1
+
+adb shell screencap -p %DEVSHOT% >nul 2>&1
+if errorlevel 1 (
+    echo   [FAIL] screenshot.png  ^(screencap failed, device may be asleep^)
+    >>snapshot_summary.txt echo  [FAIL] screenshot.png   ^<- screencap
+    goto :ss_done
+)
+adb pull %DEVSHOT% "%SHOT%" >pull.txt 2>&1
+adb shell rm -f %DEVSHOT% >nul 2>&1
+
+if not exist "%SHOT%" (
+    echo   [FAIL] screenshot.png  ^(adb pull failed, see pull.txt^)
+    >>snapshot_summary.txt echo  [FAIL] screenshot.png   ^<- adb pull
+    goto :ss_done
+)
+for %%F in ("%SHOT%") do set "SZS=%%~zF"
+
+:: A PNG starts with the 89 50 4E 47 signature. An 8-byte or a text file
+:: here means the capture was truncated or the device returned an error.
+set "PNGOK=0"
+certutil -dump "%SHOT%" 2>nul | findstr /c:"89 50 4e 47" >nul 2>&1
+if not errorlevel 1 set "PNGOK=1"
+
+if "!PNGOK!"=="1" (
+    echo   [ OK ] %SHOT%  !SZS! bytes
+    >>snapshot_summary.txt echo  [ OK ] %SHOT%  !SZS! bytes   ^<- screencap
+) else (
+    echo   [WARN] %SHOT%  !SZS! bytes, not a valid PNG ^(truncated?^)
+    >>snapshot_summary.txt echo  [WARN] %SHOT%  !SZS! bytes, invalid PNG   ^<- screencap
+)
+
+:ss_done
 exit /b 0
 
 :snap

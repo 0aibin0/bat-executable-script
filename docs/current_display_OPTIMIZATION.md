@@ -2,6 +2,7 @@
 
 > 对象：`current_display.bat`（原版 40 行 → 优化版 192 行）
 > 更新：2026-11-19 新增可选 bugreport（`ENABLE_BUGREPORT=1`）
+> 更新：2026-11-23 新增截图步骤（`screenshot.png`）
 > 备份：`current_display.bat.bak_20261105`（原版原样保留）
 > 验证：真机实测（AEOTS / p26-userdebug / 已 root），非桩测试
 > 日期：2026-11-05
@@ -16,6 +17,7 @@
 `devices.txt` / `logcat_all_current.txt` / `dmesg_current.txt` / `dumpsys_display_current.txt` / `dumpsys_sf_current.txt` / `dumpsys_input_current.txt` / `dumpsys_power_current.txt` / `dumpsys_gpu_current.txt` / `dumpsys_meminfo_current.txt` / `dumpsys_window_current.txt` / `getprop_current.txt` / `cmdline.txt`
 
 新增一份 `snapshot_summary.txt`，列出每个产物的字节数。
+新增 `screenshot.png`（2026-11-23）。
 
 **默认不抓 bugreport**（见第 6 节）：这个脚本定位是"几秒出结果的快速点查"，而 `adb bugreport` 要 1–3 分钟。需要时用 `ENABLE_BUGREPORT=1` 显式开启。
 
@@ -106,6 +108,80 @@ DRIVER-EXITCODE=1
 - 原版是 UTF-8 + `chcp 65001`，脚本正文本身没有中文，所以本来也能跑；改纯 ASCII 是为了彻底避开一类 Windows 批处理编码坑：**cmd 读取 UTF-8 批处理时，若代码块内出现中文，解析器会在字节层面错位**，把注释/命令截断（这个坑在 `disp_continuous_monitor.bat` 上踩过，表现为 `else was unexpected at this time`）。
 - 输出目录名里若含中文（如 `bat脚本`），不影响：`%~dp0` 由 cmd 内部按 Unicode 处理，与脚本文件自身编码无关。
 - 消息文案沿用原版的英文，保持一致且零风险。
+
+---
+
+## 5.5. 截图步骤（2026-11-23 新增）
+
+快照抓完后自动截一张屏幕，存为 `screenshot.png`，与 dumpsys/logcat 放在同一个
+`LOGS_<时间戳>\` 目录里。
+
+流程从 4/5 步变成 5/6 步：
+
+```
+[4/5] Capturing snapshots ...      12 项 dumpsys/logcat/dmesg
+[5/5] Capturing screenshot ...
+  [ OK ] screenshot.png  15809 bytes
+```
+
+开启 bugreport 时是 `[5/6]` 截图 + `[6/6]` bugreport。
+
+### 实现细节
+
+```bat
+adb shell screencap -p /sdcard/_cdsnap_shot.png   :: 先写设备端
+adb pull /sdcard/_cdsnap_shot.png screenshot.png  :: 再拉回本机
+adb shell rm -f /sdcard/_cdsnap_shot.png          :: 清理设备端
+```
+
+**为什么绕 `/sdcard` 而不直接写本机**：`screencap` 是设备端命令，`-p` 后面的路径
+是**设备上的路径**，写成 `./screenshot.png` 会在设备当前目录（可能是只读的
+`/`）创建失败。必须先落到 `/sdcard`，再 `adb pull` 回主机。
+
+### 三层校验
+
+| 校验 | 失败时的提示 |
+|---|---|
+| `screencap` 退出码 | `[FAIL] screenshot.png (screencap failed, device may be asleep)` |
+| `adb pull` 后文件是否存在 | `[FAIL] screenshot.png (adb pull failed, see pull.txt)` |
+| PNG 签名（`89 50 4E 47`） | `[WARN] screenshot.png N bytes, not a valid PNG (truncated?)` |
+
+第三层用 `certutil -dump | findstr` 读文件头前 4 字节。之所以要看签名而不能只看
+字节数：**小屏设备的合法 PNG 可能只有 2 KB**（如 534×534 表盘只有 2386 字节），
+按大小判会误报；而真正截断时文件头会变成报错文本。
+
+三条结果都会写进 `snapshot_summary.txt`。
+
+### 实测
+
+设备 `12786557502185`：
+
+```
+=== 模式 A: ENABLE_BUGREPORT=0 ===
+[5/5] Capturing screenshot ...
+  [ OK ] screenshot.png  15809 bytes
+  产物: screenshot.png (15809 bytes) + pull.txt
+
+=== 模式 B: ENABLE_BUGREPORT=1 ===
+[5/6] Capturing screenshot ...
+  [ OK ] screenshot.png  15809 bytes
+[6/6] Generating bugreport ...
+  [ OK ] bugreport.zip  4749135 bytes
+```
+
+### 踩到的坑
+
+第一版把提示文案写成：
+
+```bat
+echo   [FAIL] screenshot.png  (screencap failed, device may be asleep)
+```
+
+**括号没转义，在 `if (...)` 块内会提前闭合语句块**，导致后续 `adb pull`
+整段被跳过，截图永远报 FAIL（而 `screencap` 其实成功了）。
+
+改成 `^(` `^)` 后正常。这是 Windows 批处理的老坑，`.bat` 里块内的括号
+必须转义或用引号包住。
 
 ---
 
